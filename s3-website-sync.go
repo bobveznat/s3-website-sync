@@ -1,23 +1,23 @@
 package main
 
 import (
-    "compress/gzip"
+	"compress/gzip"
 	"crypto/md5"
 	"flag"
 	"fmt"
 	"github.com/mitchellh/goamz/aws"
 	"github.com/mitchellh/goamz/s3"
 	"io"
-    "io/ioutil"
+	"io/ioutil"
 	"log"
 	"os"
-    "strings"
+	"strings"
 )
 
-var content_type_map = map[string]string {
-    "css": "text/css",
-    "html": "text/html",
-    "js": "text/javascript",
+var content_type_map = map[string]string{
+	"css":  "text/css",
+	"html": "text/html",
+	"js":   "text/javascript",
 }
 
 func get_s3_dir(bucket *s3.Bucket, directory_path string, s3_contents *map[string]s3.Key) {
@@ -27,7 +27,7 @@ func get_s3_dir(bucket *s3.Bucket, directory_path string, s3_contents *map[strin
 		os.Exit(1)
 	}
 	for _, key := range contents.Contents {
-        (*s3_contents)[key.Key] = key
+		(*s3_contents)[key.Key] = key
 	}
 	for _, subdir := range contents.CommonPrefixes {
 		get_s3_dir(bucket, subdir, s3_contents)
@@ -35,9 +35,9 @@ func get_s3_dir(bucket *s3.Bucket, directory_path string, s3_contents *map[strin
 }
 
 type FileInfo struct {
-	absolute_path string
+	absolute_path   string
 	compressed_path string
-	os_fileinfo   os.FileInfo
+	os_fileinfo     os.FileInfo
 }
 
 func main() {
@@ -64,7 +64,7 @@ func main() {
 		os.Exit(1)
 	}
 
-    s3_keys := map[string]s3.Key {}
+	s3_keys := map[string]s3.Key{}
 	get_s3_dir(bucket, "", &s3_keys)
 
 	all_files := make(chan *FileInfo, 10)
@@ -81,7 +81,7 @@ func hash_file(filename string) (string, error) {
 	defer file.Close()
 
 	hasher := md5.New()
-    io.Copy(hasher,file)
+	io.Copy(hasher, file)
 	hash_val := fmt.Sprintf("%x", hasher.Sum(nil))
 	return hash_val, nil
 }
@@ -93,78 +93,77 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		}
 		log.Println(file_info.absolute_path)
 
-        headers := map[string][]string {}
-        var cache_control []string
-        cache_control = append(cache_control, "max-age=900")
-        headers["Cache-Control"] = cache_control
+		headers := map[string][]string{}
+		var cache_control []string
+		cache_control = append(cache_control, "max-age=900")
+		headers["Cache-Control"] = cache_control
 
-        dot_idx := 1 + strings.LastIndex(file_info.absolute_path, ".")
-        suffix := file_info.absolute_path[dot_idx:]
-        if suffix != "jpg" && suffix != "gif" && suffix != "png" {
-            log.Println("\tcompressing", suffix)
-            compressed_file, err := ioutil.TempFile("", "s3uploader")
-            if err != nil {
-                log.Println("\tCouldn't get a temp file", err)
-                continue
-            }
-            gzipper, _ := gzip.NewWriterLevel(compressed_file, gzip.BestCompression)
-            file, err := os.Open(file_info.absolute_path)
-            if err != nil {
-                log.Println("\tCouldn't open original file", file_info.absolute_path, err)
-                continue
-            }
-            io.Copy(gzipper, file)
-            file.Close()
-            gzipper.Close()
-            file_info.compressed_path = compressed_file.Name()
+		dot_idx := 1 + strings.LastIndex(file_info.absolute_path, ".")
+		suffix := file_info.absolute_path[dot_idx:]
+		if suffix != "jpg" && suffix != "gif" && suffix != "png" {
+			log.Println("\tcompressing", suffix)
+			compressed_file, err := ioutil.TempFile("", "s3uploader")
+			if err != nil {
+				log.Println("\tCouldn't get a temp file", err)
+				continue
+			}
+			gzipper, _ := gzip.NewWriterLevel(compressed_file, gzip.BestCompression)
+			file, err := os.Open(file_info.absolute_path)
+			if err != nil {
+				log.Println("\tCouldn't open original file", file_info.absolute_path, err)
+				continue
+			}
+			io.Copy(gzipper, file)
+			file.Close()
+			gzipper.Close()
+			file_info.compressed_path = compressed_file.Name()
 
-            var content_encoding []string
-            content_encoding = append(content_encoding, "gzip")
-            var content_type []string
-            content_type_str, ok := content_type_map[suffix]
-            if !ok {
-                content_type_str = "application/octet-stream"
-                log.Println("\tUnknown extension:", file_info.absolute_path)
-            }
-            content_type = append(content_type, content_type_str)
-            headers["Content-Type"] = content_type
-            headers["Content-Encoding"] = content_encoding
-        }
+			var content_encoding []string
+			content_encoding = append(content_encoding, "gzip")
+			var content_type []string
+			content_type_str, ok := content_type_map[suffix]
+			if !ok {
+				content_type_str = "application/octet-stream"
+				log.Println("\tUnknown extension:", file_info.absolute_path)
+			}
+			content_type = append(content_type, content_type_str)
+			headers["Content-Type"] = content_type
+			headers["Content-Encoding"] = content_encoding
+		}
 
-        var path_to_contents string
-        if len(file_info.compressed_path) > 0 {
-            path_to_contents = file_info.compressed_path
-        } else {
-            path_to_contents = file_info.absolute_path
-        }
+		var path_to_contents string
+		if len(file_info.compressed_path) > 0 {
+			path_to_contents = file_info.compressed_path
+		} else {
+			path_to_contents = file_info.absolute_path
+		}
 		hash, err := hash_file(path_to_contents)
 		if err != nil {
 			log.Printf("\tCouldn't do hash for %s: %v\n",
 				file_info.absolute_path, err)
 		}
-        key_name := file_info.absolute_path[len(source_path) + 1:]
-        key, ok := s3_keys[key_name]
-        // this library returns the ETag with quotes around it, we strip them
-        if ok && key.ETag[1:len(key.ETag)-1] == hash {
-            log.Println("\thashes match, no upload required", key_name)
-            continue
-        } else {
-            log.Println("\tUploading", key_name)
-        }
+		key_name := file_info.absolute_path[len(source_path)+1:]
+		key, ok := s3_keys[key_name]
+		// this library returns the ETag with quotes around it, we strip them
+		if ok && key.ETag[1:len(key.ETag)-1] == hash {
+			log.Println("\thashes match, no upload required", key_name)
+			continue
+		} else {
+			log.Println("\tUploading", key_name)
+		}
 
-        info, _ := os.Stat(path_to_contents)
-        file, err := os.Open(path_to_contents)
-        if err != nil {
-            log.Printf("Can't open file %s: %v\n", path_to_contents, err)
-        }
-        bucket.PutReaderHeader(key_name, file, info.Size(),
-            headers, s3.PublicRead)
-        file.Close()
-        if len(file_info.compressed_path) > 0 {
-            os.Remove(file_info.compressed_path)
-        }
-        log.Println("\tFinished upload")
-
+		info, _ := os.Stat(path_to_contents)
+		file, err := os.Open(path_to_contents)
+		if err != nil {
+			log.Printf("Can't open file %s: %v\n", path_to_contents, err)
+		}
+		bucket.PutReaderHeader(key_name, file, info.Size(),
+			headers, s3.PublicRead)
+		file.Close()
+		if len(file_info.compressed_path) > 0 {
+			os.Remove(file_info.compressed_path)
+		}
+		log.Println("\tFinished upload")
 
 	}
 }

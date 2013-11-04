@@ -94,9 +94,7 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		log.Println(file_info.absolute_path)
 
 		headers := map[string][]string{}
-		var cache_control []string
-		cache_control = append(cache_control, "max-age=900")
-		headers["Cache-Control"] = cache_control
+        headers["Cache-Control"] = []string{"max-age=900"}
 
 		dot_idx := 1 + strings.LastIndex(file_info.absolute_path, ".")
 		suffix := file_info.absolute_path[dot_idx:]
@@ -118,17 +116,13 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 			gzipper.Close()
 			file_info.compressed_path = compressed_file.Name()
 
-			var content_encoding []string
-			content_encoding = append(content_encoding, "gzip")
-			var content_type []string
 			content_type_str, ok := content_type_map[suffix]
 			if !ok {
 				content_type_str = "application/octet-stream"
 				log.Println("\tUnknown extension:", file_info.absolute_path)
 			}
-			content_type = append(content_type, content_type_str)
-			headers["Content-Type"] = content_type
-			headers["Content-Encoding"] = content_encoding
+			headers["Content-Type"] = []string{content_type_str}
+			headers["Content-Encoding"] = []string{"gzip"}
 		}
 
 		var path_to_contents string

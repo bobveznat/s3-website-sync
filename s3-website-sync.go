@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/mitchellh/goamz/aws"
-	"github.com/mitchellh/goamz/s3"
+	"github.com/bobveznat/goamz/s3"
 	"io"
 	"io/ioutil"
 	"log"
@@ -18,20 +18,6 @@ var content_type_map = map[string]string{
 	"css":  "text/css",
 	"html": "text/html",
 	"js":   "text/javascript",
-}
-
-func get_s3_dir(bucket *s3.Bucket, directory_path string, s3_contents *map[string]s3.Key) {
-	contents, err := bucket.List(directory_path, "/", "/", 1024)
-	if err != nil {
-		log.Print("no listing?", err)
-		os.Exit(1)
-	}
-	for _, key := range contents.Contents {
-		(*s3_contents)[key.Key] = key
-	}
-	for _, subdir := range contents.CommonPrefixes {
-		get_s3_dir(bucket, subdir, s3_contents)
-	}
 }
 
 type FileInfo struct {
@@ -64,12 +50,17 @@ func main() {
 		os.Exit(1)
 	}
 
-	s3_keys := map[string]s3.Key{}
-	get_s3_dir(bucket, "", &s3_keys)
-
-	all_files := make(chan *FileInfo, 10)
+    s3_keys, _ := bucket.GetBucketContents()
+	all_files := make(chan *FileInfo, 100)
+    done_channel := make(chan int)
 	go get_all_files(*source_path, all_files, true)
-	process_all_files(*source_path, all_files, bucket, s3_keys)
+    num_uploaders := 4
+    for i:= 0; i < num_uploaders; i++ {
+        go process_all_files(*source_path, all_files, bucket, s3_keys, done_channel)
+    }
+    for i:= 0; i < num_uploaders; i++ {
+        <-done_channel
+    }
 }
 
 func hash_file(filename string) (string, error) {
@@ -86,7 +77,7 @@ func hash_file(filename string) (string, error) {
 	return hash_val, nil
 }
 
-func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.Bucket, s3_keys map[string]s3.Key) {
+func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.Bucket, s3_keys *map[string]s3.Key, done_channel chan int) {
 	for file_info := range all_files {
 		if file_info == nil {
 			break
@@ -137,7 +128,7 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 				file_info.absolute_path, err)
 		}
 		key_name := file_info.absolute_path[len(source_path)+1:]
-		key, ok := s3_keys[key_name]
+		key, ok := (*s3_keys)[key_name]
 		// this library returns the ETag with quotes around it, we strip them
 		if ok && key.ETag[1:len(key.ETag)-1] == hash {
 			log.Println("\thashes match, no upload required", key_name)
@@ -160,6 +151,7 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		log.Println("\tFinished upload")
 
 	}
+    done_channel <- 1
 }
 
 func get_all_files(dirname string, all_files chan *FileInfo, first_call bool) {
@@ -183,6 +175,6 @@ func get_all_files(dirname string, all_files chan *FileInfo, first_call bool) {
 		}
 	}
 	if first_call {
-		all_files <- nil
+		close(all_files)
 	}
 }

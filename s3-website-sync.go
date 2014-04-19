@@ -6,7 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"github.com/mitchellh/goamz/aws"
-	"github.com/bobveznat/goamz/s3"
+	"github.com/mitchellh/goamz/s3"
 	"io"
 	"io/ioutil"
 	"log"
@@ -17,7 +17,15 @@ import (
 var content_type_map = map[string]string{
 	"css":  "text/css",
 	"html": "text/html",
+	"htm":  "text/html",
+	"ico":  "image/x-ico",
 	"js":   "text/javascript",
+	"jpg":  "image/jpeg",
+	"JPG":  "image/jpeg",
+	"gif":  "image/gif",
+	"GIF":  "image/gif",
+	"png":  "image/png",
+	"PNG":  "image/png",
 }
 
 type FileInfo struct {
@@ -30,11 +38,15 @@ func main() {
 
 	var source_path = flag.String("source-path", "", "Source directory")
 	var dest_bucket = flag.String("bucket", "", "Bucket in S3")
+	var region_name = flag.String("region", "", "AWS region of the bucket")
 	flag.Parse()
 	if *source_path == "" || *dest_bucket == "" {
 		log.Println("Missing -source-path or -bucket")
 		flag.Usage()
 		os.Exit(1)
+	}
+	if *region_name == "" {
+		*region_name = "us-east-1"
 	}
 	creds, err := aws.EnvAuth()
 	if err != nil {
@@ -42,7 +54,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	region := aws.Regions["us-east-1"]
+	region := aws.Regions[*region_name]
 	s3_conn := s3.New(creds, region)
 	bucket := s3_conn.Bucket(*dest_bucket)
 	if bucket == nil {
@@ -50,17 +62,17 @@ func main() {
 		os.Exit(1)
 	}
 
-    s3_keys, _ := bucket.GetBucketContents()
+	s3_keys, _ := bucket.GetBucketContents()
 	all_files := make(chan *FileInfo, 100)
-    done_channel := make(chan int)
+	done_channel := make(chan int)
 	go get_all_files(*source_path, all_files, true)
-    num_uploaders := 4
-    for i:= 0; i < num_uploaders; i++ {
-        go process_all_files(*source_path, all_files, bucket, s3_keys, done_channel)
-    }
-    for i:= 0; i < num_uploaders; i++ {
-        <-done_channel
-    }
+	num_uploaders := 4
+	for i := 0; i < num_uploaders; i++ {
+		go process_all_files(*source_path, all_files, bucket, s3_keys, done_channel)
+	}
+	for i := 0; i < num_uploaders; i++ {
+		<-done_channel
+	}
 }
 
 func hash_file(filename string) (string, error) {
@@ -85,11 +97,11 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		log.Println(file_info.absolute_path)
 
 		headers := map[string][]string{}
-        headers["Cache-Control"] = []string{"max-age=900"}
+		headers["Cache-Control"] = []string{"max-age=900"}
 
 		dot_idx := 1 + strings.LastIndex(file_info.absolute_path, ".")
 		suffix := file_info.absolute_path[dot_idx:]
-		if suffix != "jpg" && suffix != "gif" && suffix != "png" {
+		if suffix != "jpg" && suffix != "gif" && suffix != "png" && suffix != "JPG" && suffix != "GIF" && suffix != "PNG" {
 			log.Println("\tcompressing", suffix)
 			compressed_file, err := ioutil.TempFile("", "s3uploader")
 			if err != nil {
@@ -114,6 +126,13 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 			}
 			headers["Content-Type"] = []string{content_type_str}
 			headers["Content-Encoding"] = []string{"gzip"}
+		} else {
+			content_type_str, ok := content_type_map[suffix]
+			if !ok {
+				content_type_str = "application/octet-stream"
+				log.Println("\tUnknown extension:", file_info.absolute_path)
+			}
+			headers["Content-Type"] = []string{content_type_str}
 		}
 
 		var path_to_contents string
@@ -151,7 +170,7 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		log.Println("\tFinished upload")
 
 	}
-    done_channel <- 1
+	done_channel <- 1
 }
 
 func get_all_files(dirname string, all_files chan *FileInfo, first_call bool) {

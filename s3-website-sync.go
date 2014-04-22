@@ -5,8 +5,8 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
+	"github.com/bobveznat/goamz/s3"
 	"github.com/mitchellh/goamz/aws"
-	"github.com/mitchellh/goamz/s3"
 	"io"
 	"io/ioutil"
 	"log"
@@ -57,6 +57,7 @@ func main() {
 	region := aws.Regions[*region_name]
 	s3_conn := s3.New(creds, region)
 	bucket := s3_conn.Bucket(*dest_bucket)
+	bucket.PutBucket(s3.PublicRead)
 	if bucket == nil {
 		log.Println("no bucket?")
 		os.Exit(1)

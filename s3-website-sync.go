@@ -39,6 +39,7 @@ func main() {
 	var source_path = flag.String("source-path", "", "Source directory")
 	var dest_bucket = flag.String("bucket", "", "Bucket in S3")
 	var region_name = flag.String("region", "", "AWS region of the bucket")
+	var force_upload = flag.Bool("force_upload", false, "Do an upload even if hashes match.")
 	flag.Parse()
 	if *source_path == "" || *dest_bucket == "" {
 		log.Println("Missing -source-path or -bucket")
@@ -69,7 +70,7 @@ func main() {
 	go get_all_files(*source_path, all_files, true)
 	num_uploaders := 4
 	for i := 0; i < num_uploaders; i++ {
-		go process_all_files(*source_path, all_files, bucket, s3_keys, done_channel)
+		go process_all_files(*source_path, all_files, bucket, s3_keys, done_channel, *force_upload)
 	}
 	for i := 0; i < num_uploaders; i++ {
 		<-done_channel
@@ -90,7 +91,7 @@ func hash_file(filename string) (string, error) {
 	return hash_val, nil
 }
 
-func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.Bucket, s3_keys *map[string]s3.Key, done_channel chan int) {
+func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.Bucket, s3_keys *map[string]s3.Key, done_channel chan int, force_upload bool) {
 	for file_info := range all_files {
 		if file_info == nil {
 			break
@@ -150,7 +151,7 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		key_name := file_info.absolute_path[len(source_path)+1:]
 		key, ok := (*s3_keys)[key_name]
 		// this library returns the ETag with quotes around it, we strip them
-		if ok && key.ETag[1:len(key.ETag)-1] == hash {
+		if ok && !force_upload && key.ETag[1:len(key.ETag)-1] == hash {
 			log.Println("\thashes match, no upload required", key_name)
 			continue
 		} else {
@@ -162,8 +163,11 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		if err != nil {
 			log.Printf("Can't open file %s: %v\n", path_to_contents, err)
 		}
-		bucket.PutReaderHeader(key_name, file, info.Size(),
+        err = bucket.PutReaderHeader(key_name, file, info.Size(),
 			headers, s3.PublicRead)
+        if err != nil {
+            log.Printf("Failed to upload %s: %s\n", file, err)
+        }
 		file.Close()
 		if len(file_info.compressed_path) > 0 {
 			os.Remove(file_info.compressed_path)

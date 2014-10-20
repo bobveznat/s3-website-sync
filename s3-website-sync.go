@@ -5,7 +5,7 @@ import (
 	"crypto/md5"
 	"flag"
 	"fmt"
-	"github.com/bobveznat/goamz/s3"
+	"github.com/mitchellh/goamz/s3"
 	"github.com/mitchellh/goamz/aws"
 	"io"
 	"io/ioutil"

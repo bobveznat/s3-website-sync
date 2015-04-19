@@ -26,6 +26,7 @@ var content_type_map = map[string]string{
 	"GIF":  "image/gif",
 	"png":  "image/png",
 	"PNG":  "image/png",
+	"xml":  "application/xml",
 }
 
 type FileInfo struct {
@@ -163,11 +164,11 @@ func process_all_files(source_path string, all_files chan *FileInfo, bucket *s3.
 		if err != nil {
 			log.Printf("Can't open file %s: %v\n", path_to_contents, err)
 		}
-        err = bucket.PutReaderHeader(key_name, file, info.Size(),
+		err = bucket.PutReaderHeader(key_name, file, info.Size(),
 			headers, s3.PublicRead)
-        if err != nil {
-            log.Printf("Failed to upload %s: %s\n", file, err)
-        }
+		if err != nil {
+			log.Printf("Failed to upload %s: %s\n", file, err)
+		}
 		file.Close()
 		if len(file_info.compressed_path) > 0 {
 			os.Remove(file_info.compressed_path)
